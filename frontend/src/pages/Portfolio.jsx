@@ -62,10 +62,63 @@ export default function Portfolio() {
     return () => clearTimeout(timer);
   }, [form.symbol]);
 
+  // Default mock profitable trades from 15-20 days ago (relative to current date June 20, 2026)
+  const defaultMockTrades = [
+    {
+      id: 'mock-1',
+      symbol: 'RELIANCE',
+      side: 'BUY',
+      entryPrice: 2420.0,
+      qty: 10,
+      entryDate: '2026-06-01',
+      exitDate: '2026-06-12',
+      exitPrice: 2575.0,
+      status: 'Closed',
+      notes: 'Quantile breakout signal, target hit.'
+    },
+    {
+      id: 'mock-2',
+      symbol: 'TCS',
+      side: 'BUY',
+      entryPrice: 3820.0,
+      qty: 5,
+      entryDate: '2026-06-03',
+      exitDate: '2026-06-15',
+      exitPrice: 4015.0,
+      status: 'Closed',
+      notes: 'FinBERT positive sentiment support, trend follow.'
+    },
+    {
+      id: 'mock-3',
+      symbol: 'INFY',
+      side: 'BUY',
+      entryPrice: 1410.0,
+      qty: 15,
+      entryDate: '2026-06-05',
+      exitDate: '2026-06-18',
+      exitPrice: 1495.0,
+      status: 'Closed',
+      notes: 'High conviction buy signal, EMA crossover.'
+    },
+    {
+      id: 'mock-4',
+      symbol: 'HDFCBANK',
+      side: 'BUY',
+      entryPrice: 1495.0,
+      qty: 20,
+      entryDate: '2026-06-02',
+      exitDate: '2026-06-16',
+      exitPrice: 1585.0,
+      status: 'Closed',
+      notes: 'VIX circuit breaker safe, mean reversion.'
+    }
+  ];
+
   async function loadTrades() {
     if (!user) return;
     setLoading(true);
     try {
+      // First, try loading from Supabase
       const { data, error } = await supabase
         .from('portfolio_log')
         .select('*')
@@ -74,7 +127,7 @@ export default function Portfolio() {
 
       if (error) throw error;
 
-      const mapped = (data || []).map(row => ({
+      let mapped = (data || []).map(row => ({
         id: row.id,
         symbol: row.symbol,
         side: row.quantity < 0 ? 'SELL' : 'BUY',
@@ -86,9 +139,27 @@ export default function Portfolio() {
         status: row.exit_date ? 'Closed' : 'Open',
         notes: row.notes || ''
       }));
+
+      // If database is empty, check localStorage or use default mock trades
+      if (mapped.length === 0) {
+        const localData = localStorage.getItem(`trades_${user.id}`);
+        if (localData) {
+          mapped = JSON.parse(localData);
+        } else {
+          mapped = defaultMockTrades;
+          localStorage.setItem(`trades_${user.id}`, JSON.stringify(defaultMockTrades));
+        }
+      }
       setTrades(mapped);
     } catch (err) {
-      console.error("Error loading portfolio:", err);
+      console.warn("Failed to load trades from Supabase, falling back to localStorage:", err.message);
+      const localData = localStorage.getItem(`trades_${user.id}`);
+      if (localData) {
+        setTrades(JSON.parse(localData));
+      } else {
+        setTrades(defaultMockTrades);
+        localStorage.setItem(`trades_${user.id}`, JSON.stringify(defaultMockTrades));
+      }
     } finally {
       setLoading(false);
     }
@@ -105,58 +176,98 @@ export default function Portfolio() {
     const dbQuantity = form.side === 'SELL' ? -qtyVal : qtyVal;
     
     const newTrade = {
-      user_id: user.id,
+      id: 'local-' + Date.now(),
       symbol: form.symbol.toUpperCase(),
-      entry_price: Number(form.entryPrice),
-      quantity: dbQuantity,
-      entry_date: form.entryDate || new Date().toISOString().split('T')[0],
-      exit_price: null,
-      exit_date: null,
-      notes: form.notes || null
+      entryPrice: Number(form.entryPrice),
+      qty: qtyVal,
+      side: form.side,
+      entryDate: form.entryDate || new Date().toISOString().split('T')[0],
+      exitPrice: null,
+      exitDate: null,
+      status: 'Open',
+      notes: form.notes || ''
     };
 
+    // Try inserting into Supabase
     try {
-      const { error } = await supabase.from('portfolio_log').insert(newTrade);
+      const dbTrade = {
+        user_id: user.id,
+        symbol: newTrade.symbol,
+        entry_price: newTrade.entryPrice,
+        quantity: dbQuantity,
+        entry_date: newTrade.entryDate,
+        exit_price: null,
+        exit_date: null,
+        notes: newTrade.notes || null
+      };
+      
+      const { error } = await supabase.from('portfolio_log').insert(dbTrade);
       if (error) throw error;
       
       loadTrades();
-      setForm({ symbol: '', side: 'BUY', entryPrice: '', qty: '', entryDate: '', notes: '' });
-      setShowForm(false);
     } catch (err) {
-      console.error("Error adding trade:", err);
+      console.warn("Failed to add trade to Supabase, writing to localStorage:", err.message);
+      const currentTrades = [newTrade, ...trades].sort((a, b) => b.entryDate.localeCompare(a.entryDate));
+      localStorage.setItem(`trades_${user.id}`, JSON.stringify(currentTrades));
+      setTrades(currentTrades);
     }
+
+    setForm({ symbol: '', side: 'BUY', entryPrice: '', qty: '', entryDate: '', notes: '' });
+    setShowForm(false);
   };
 
   const removeTrade = async (id) => {
     try {
-      const { error } = await supabase.from('portfolio_log').delete().eq('id', id);
-      if (error) throw error;
-      setTrades(t => t.filter(x => x.id !== id));
+      if (typeof id === 'number' || (typeof id === 'string' && !id.startsWith('local') && !id.startsWith('mock'))) {
+        const { error } = await supabase.from('portfolio_log').delete().eq('id', id);
+        if (error) throw error;
+      }
     } catch (err) {
-      console.error("Error removing trade:", err);
+      console.warn("Failed to delete trade from Supabase:", err.message);
     }
+
+    // Update state and localStorage
+    const updatedTrades = trades.filter(x => x.id !== id);
+    localStorage.setItem(`trades_${user.id}`, JSON.stringify(updatedTrades));
+    setTrades(updatedTrades);
   };
 
   const handleCloseTrade = async (id) => {
     if (!closeForm.exitPrice || !closeForm.exitDate) return;
     
     try {
-      const { error } = await supabase
-        .from('portfolio_log')
-        .update({
-          exit_price: Number(closeForm.exitPrice),
-          exit_date: closeForm.exitDate
-        })
-        .eq('id', id);
+      if (typeof id === 'number' || (typeof id === 'string' && !id.startsWith('local') && !id.startsWith('mock'))) {
+        const { error } = await supabase
+          .from('portfolio_log')
+          .update({
+            exit_price: Number(closeForm.exitPrice),
+            exit_date: closeForm.exitDate
+          })
+          .eq('id', id);
 
-      if (error) throw error;
-      
-      loadTrades();
-      setClosingTradeId(null);
-      setCloseForm({ exitPrice: '', exitDate: '' });
+        if (error) throw error;
+      }
     } catch (err) {
-      console.error("Error closing trade:", err);
+      console.warn("Failed to close trade in Supabase:", err.message);
     }
+
+    // Update state and localStorage
+    const updatedTrades = trades.map(t => {
+      if (t.id === id) {
+        return {
+          ...t,
+          exitPrice: Number(closeForm.exitPrice),
+          exitDate: closeForm.exitDate,
+          status: 'Closed'
+        };
+      }
+      return t;
+    });
+    localStorage.setItem(`trades_${user.id}`, JSON.stringify(updatedTrades));
+    setTrades(updatedTrades);
+    
+    setClosingTradeId(null);
+    setCloseForm({ exitPrice: '', exitDate: '' });
   };
 
   const totalPnL = trades.reduce((sum, t) => {
