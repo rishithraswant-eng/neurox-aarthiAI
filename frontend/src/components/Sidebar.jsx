@@ -1,16 +1,19 @@
 import React from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Star, BookOpen, Settings, Shield,
   TrendingUp, LogOut, Activity, ChevronRight
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 
-const navItems = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+import ModeSwitch from './longterm/ModeSwitch';
+
+const getNavItems = (isLongTerm) => [
+  { to: isLongTerm ? '/longterm' : '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/watchlist', icon: Star, label: 'Watchlist' },
   { to: '/portfolio', icon: BookOpen, label: 'Portfolio' },
   { to: '/settings', icon: Settings, label: 'Settings' },
+  ...(isLongTerm ? [{ to: '/longterm/methodology', icon: BookOpen, label: 'Methodology' }] : [])
 ];
 
 const adminItems = [
@@ -22,7 +25,10 @@ const adminItems = [
 export default function Sidebar() {
   const { user, signOut } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const isAdmin = user?.user_metadata?.role === 'admin' || user?.email?.includes('admin');
+  const isLongTerm = location.pathname.startsWith('/longterm');
+  const activeNavItems = getNavItems(isLongTerm);
 
   const handleSignOut = async () => {
     await signOut();
@@ -38,21 +44,22 @@ export default function Sidebar() {
             <TrendingUp className="w-4 h-4 text-[var(--color-positive)]" />
           </div>
           <div>
-            <span className="font-display text-xl text-[var(--text-primary)]">TradeSignal</span>
-            <span className="font-label text-[var(--color-positive)] block -mt-1">Pro</span>
+            <span className="font-display text-xl text-[var(--text-primary)]">Aarthi AI</span>
           </div>
         </div>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 p-4 space-y-2">
+      <nav className="flex-1 py-4 space-y-2 overflow-y-auto">
+        <ModeSwitch />
         <p className="font-label px-3 mb-4 mt-2">Main</p>
-        {navItems.map(({ to, icon: Icon, label }) => (
+        {activeNavItems.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}
+            end={to === '/longterm'}
             className={({ isActive }) =>
-              `flex items-center space-x-3 w-full px-3 py-2.5 rounded-lg font-label transition-colors ${
+              `flex items-center space-x-3 w-full px-3 py-2.5 mx-3 max-w-[calc(100%-1.5rem)] rounded-lg font-label transition-colors ${
                 isActive 
                   ? 'bg-[var(--text-caption)]/10 text-[var(--text-primary)]' 
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--text-caption)]/5'

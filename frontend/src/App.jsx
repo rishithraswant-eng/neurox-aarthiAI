@@ -26,6 +26,11 @@ import PipelineHealth from './pages/admin/PipelineHealth';
 import ModelAccuracy from './pages/admin/ModelAccuracy';
 import RetrainApproval from './pages/admin/RetrainApproval';
 
+// Long-Term pages
+import LongTermDashboard from './pages/longterm/LongTermDashboard';
+import LongTermStockDetail from './pages/longterm/LongTermStockDetail';
+import Methodology from './pages/longterm/Methodology';
+
 // ─── Auth Guard ────────────────────────────────────────────────────────────
 function RequireAuth({ children }) {
   const { user, initialized } = useAuthStore();
@@ -112,6 +117,23 @@ function AppInner() {
         <Route path="/settings" element={
           <RequireAuth>
             <AppShell><SettingsPage /></AppShell>
+          </RequireAuth>
+        } />
+
+        {/* Long-Term — requires auth + sidebar */}
+        <Route path="/longterm" element={
+          <RequireAuth>
+            <AppShell><LongTermDashboard /></AppShell>
+          </RequireAuth>
+        } />
+        <Route path="/longterm/stock/:symbol" element={
+          <RequireAuth>
+            <AppShell><LongTermStockDetail /></AppShell>
+          </RequireAuth>
+        } />
+        <Route path="/longterm/methodology" element={
+          <RequireAuth>
+            <AppShell><Methodology /></AppShell>
           </RequireAuth>
         } />
 

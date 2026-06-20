@@ -147,6 +147,15 @@ def run_pipeline():
         logger.error(f"Unexpected crash in Outcome Tracking: {e}")
         outcomes_success = False
 
+    # Phase 8 (NEW): Aarthi AI Long-Term Signals
+    try:
+        logger.info("Starting Aarthi AI long-term signal generation...")
+        import longterm.generate_longterm_signals
+        longterm.generate_longterm_signals.generate_longterm_signals_for_today()
+        logger.info("Aarthi AI signal generation complete.")
+    except Exception as e:
+        logger.error(f"Aarthi AI phase FAILED (short-term system unaffected): {e}")
+
     # Evaluate Pipeline Status
     if bhavcopy_success and news_success and finbert_success and fundamentals_success and macro_success and features_success and signals_success and outcomes_success:
         final_status = "SUCCESS"
