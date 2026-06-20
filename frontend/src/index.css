@@ -424,7 +424,7 @@ select.input-field option {
 .ticker-content {
   display: inline-flex;
   padding-left: 100%;
-  animation: ticker 80s linear infinite; /* Halved speed */
+  animation: ticker 40s linear infinite; /* Halved speed, re-applied cleanly */
 }
 
 .ticker-wrap:hover .ticker-content {

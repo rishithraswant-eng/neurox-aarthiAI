@@ -2,7 +2,14 @@ import os
 from dotenv import load_dotenv
 env_path = os.path.join(os.path.dirname(__file__), '.env')
 load_dotenv(env_path)
-print("ENV LOADED FROM", env_path, "KEY:", os.environ.get('SUPABASE_SERVICE_ROLE_KEY')[:5] if os.environ.get('SUPABASE_SERVICE_ROLE_KEY') else None)
+import jwt
+token = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+try:
+    role = jwt.decode(token, options={'verify_signature': False}).get('role') if token else 'unknown'
+except:
+    role = 'error_decoding'
+print(f"ENV LOADED FROM {env_path}")
+print(f"SUPABASE_SERVICE_ROLE_KEY DECODED ROLE: {role}")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
