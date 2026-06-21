@@ -18,7 +18,7 @@ export default function Methodology() {
         </p>
       </div>
 
-      <HonestyBanner />
+      <HonestyBanner detailed={true} />
 
       <div className="space-y-8 mt-8">
         <section className="bg-[var(--bg-card)] border border-[var(--text-caption)]/20 rounded-xl p-6 md:p-8">
