@@ -87,15 +87,16 @@ export default function Portfolio() {
       const res  = await fetch(`${API_URL}/notion/trades?email=${encodeURIComponent(user.email)}`);
       const data = res.ok ? await res.json() : null;
 
-      if (data && data.length > 0) {
+      if (data !== null) {
         setTrades(data.map(mapNotionTrade));
+        localStorage.setItem(localKey, JSON.stringify(data.map(mapNotionTrade)));
       } else {
-        // Notion empty → check localStorage
+        // Notion fetch failed (!res.ok) → check localStorage
         const local = localStorage.getItem(localKey);
         if (local) {
           setTrades(JSON.parse(local));
         } else {
-          // Nothing anywhere → show mocks
+          // Fallback if absolutely nothing works
           setTrades(DEFAULT_MOCK_TRADES);
           localStorage.setItem(localKey, JSON.stringify(DEFAULT_MOCK_TRADES));
         }
