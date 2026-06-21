@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, Plus, TrendingUp, TrendingDown, Trash2, CheckCircle } from 'lucide-react';
+import { BookOpen, Plus, TrendingUp, TrendingDown, Trash2, CheckCircle, ExternalLink } from 'lucide-react';
 import Disclaimer from '../components/Disclaimer';
 import { API_URL } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
@@ -223,9 +223,20 @@ export default function Portfolio() {
             </h1>
             <p className="text-slate-400 text-sm mt-0.5">Manual log · Notion-synced</p>
           </div>
-          <button id="add-trade-btn" onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center space-x-2">
-            <Plus className="w-4 h-4" /><span>Log Trade</span>
-          </button>
+          <div className="flex items-center space-x-3">
+            <a 
+              href="https://www.notion.so/385c2d8e16e780eeab3ce93c2a7397dc" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="btn-secondary flex items-center space-x-2"
+            >
+              <ExternalLink className="w-4 h-4" />
+              <span className="hidden sm:inline">Log Summary</span>
+            </a>
+            <button id="add-trade-btn" onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center space-x-2">
+              <Plus className="w-4 h-4" /><span>Log Trade</span>
+            </button>
+          </div>
         </div>
 
         {/* Summary */}
