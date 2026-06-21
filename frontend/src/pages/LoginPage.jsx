@@ -1,19 +1,35 @@
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { TrendingUp, Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { Mail, Lock, Eye, EyeOff, AlertCircle, Zap } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import Disclaimer from '../components/Disclaimer';
 import CursorTrackerMascot from '../components/CursorTrackerMascot';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
+  const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
-  const [showPw, setShowPw] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const { signIn } = useAuthStore();
-  const navigate = useNavigate();
+  const [showPw, setShowPw]     = useState(false);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState(null);
+  const { signIn, ssoLogin }    = useAuthStore();
+  const navigate                = useNavigate();
+  const [searchParams]          = useSearchParams();
 
+  // ── SSO via ?token=<jwt> ──────────────────────────────────────────────────
+  useEffect(() => {
+    const token = searchParams.get('token');
+    if (!token) return;
+
+    setLoading(true);
+    ssoLogin(token)
+      .then(() => navigate('/dashboard', { replace: true }))
+      .catch(err => {
+        setError(err.message || 'Invalid SSO token');
+        setLoading(false);
+      });
+  }, [searchParams, ssoLogin, navigate]);
+
+  // ── Standard login ────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
@@ -64,6 +80,7 @@ export default function LoginPage() {
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <input
+                  id="login-email"
                   type="email"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
@@ -80,6 +97,7 @@ export default function LoginPage() {
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <input
+                  id="login-password"
                   type={showPw ? 'text' : 'password'}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
@@ -98,6 +116,7 @@ export default function LoginPage() {
             </div>
 
             <button
+              id="login-submit"
               type="submit"
               disabled={loading}
               className="btn-primary w-full flex items-center justify-center space-x-2"
@@ -116,6 +135,25 @@ export default function LoginPage() {
               Sign up
             </Link>
           </p>
+
+          {/* SSO Bypass — visible in dev mode or when running locally */}
+          {import.meta.env.DEV && (
+            <div className="mt-5 pt-4 border-t border-[var(--text-caption)]/20">
+              <p className="text-xs text-slate-500 text-center mb-3 uppercase tracking-widest">Developer Access</p>
+              <p className="text-xs text-slate-600 text-center mb-3">
+                Navigate to <code className="text-amber-400/80">/login?token=&lt;HS256_JWT&gt;</code> to bypass login
+              </p>
+              <div className="flex items-center justify-center space-x-2 text-xs text-slate-500">
+                <Zap className="w-3 h-3 text-[var(--color-highlight)]" />
+                <span>JWT payload: <code className="text-slate-400">{"{ email: '...' }"}</code></span>
+              </div>
+              <div className="mt-2">
+                <code className="block text-[10px] text-emerald-400/70 bg-slate-900/50 rounded p-2 text-center break-all">
+                  Secret: my_super_secret_sso_key_for_aarthi_ai
+                </code>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-6">

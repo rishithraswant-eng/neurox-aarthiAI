@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, Plus, TrendingUp, TrendingDown, Trash2, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { BookOpen, Plus, TrendingUp, TrendingDown, Trash2, CheckCircle } from 'lucide-react';
 import Disclaimer from '../components/Disclaimer';
-import { supabase, API_URL } from '../lib/supabase';
+import { API_URL } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 
+// ── P&L display helper ────────────────────────────────────────────────────────
 function PnLBadge({ entry, exit, side, qty }) {
   if (exit == null) return <span className="text-slate-400 text-sm">Open</span>;
   const raw = side === 'BUY' ? (exit - entry) * qty : (entry - exit) * qty;
-  const pct = side === 'BUY' ? ((exit - entry) / entry * 100) : ((entry - exit) / entry * 100);
+  const pct = side === 'BUY'
+    ? ((exit - entry) / entry * 100)
+    : ((entry - exit) / entry * 100);
   const isPos = raw >= 0;
   return (
     <div className="text-right">
@@ -21,264 +24,191 @@ function PnLBadge({ entry, exit, side, qty }) {
   );
 }
 
-export default function Portfolio() {
-  const { user } = useAuthStore();
-  const [trades, setTrades] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ symbol: '', side: 'BUY', entryPrice: '', qty: '', entryDate: '', notes: '' });
-  
-  const [closingTradeId, setClosingTradeId] = useState(null);
-  const [closeForm, setCloseForm] = useState({ exitPrice: '', exitDate: '' });
-  const [suggestedPrice, setSuggestedPrice] = useState(null);
+// ── Mock trades (shown when Notion + localStorage are both empty) ─────────────
+const DEFAULT_MOCK_TRADES = [
+  { id: 'mock-1', symbol: 'RELIANCE', side: 'BUY', entryPrice: 2420, qty: 10, entryDate: '2026-06-01', exitDate: '2026-06-12', exitPrice: 2575, status: 'Closed', notes: 'Quantile breakout signal, target hit.' },
+  { id: 'mock-2', symbol: 'TCS',      side: 'BUY', entryPrice: 3820, qty: 5,  entryDate: '2026-06-03', exitDate: '2026-06-15', exitPrice: 4015, status: 'Closed', notes: 'FinBERT positive sentiment support.' },
+  { id: 'mock-3', symbol: 'INFY',     side: 'BUY', entryPrice: 1410, qty: 15, entryDate: '2026-06-05', exitDate: '2026-06-18', exitPrice: 1495, status: 'Closed', notes: 'High conviction buy signal.' },
+  { id: 'mock-4', symbol: 'HDFCBANK', side: 'BUY', entryPrice: 1495, qty: 20, entryDate: '2026-06-02', exitDate: '2026-06-16', exitPrice: 1585, status: 'Closed', notes: 'VIX safe zone, mean reversion.' },
+];
 
+// ── Map Notion trade response to local shape ──────────────────────────────────
+function mapNotionTrade(t) {
+  return {
+    id:         t.id,
+    symbol:     t.symbol || '',
+    side:       t.side   || 'BUY',
+    entryPrice: t.entryPrice || 0,
+    qty:        t.qty || 0,
+    entryDate:  t.entryDate || '',
+    exitPrice:  t.exitPrice ?? null,
+    exitDate:   t.exitDate  ?? null,
+    status:     t.status   || 'Open',
+    notes:      t.notes    || '',
+  };
+}
+
+export default function Portfolio() {
+  const { user }  = useAuthStore();
+  const [trades, setTrades]         = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [showForm, setShowForm]     = useState(false);
+  const [form, setForm]             = useState({ symbol: '', side: 'BUY', entryPrice: '', qty: '', entryDate: '', notes: '' });
+  const [suggestedPrice, setSuggested] = useState(null);
+  const [closingId, setClosingId]   = useState(null);
+  const [closeForm, setCloseForm]   = useState({ exitPrice: '', exitDate: '' });
+
+  // ── Price suggestion when typing symbol ─────────────────────────────────────
   useEffect(() => {
     const sym = form.symbol.trim().toUpperCase();
-    if (!sym) {
-      setSuggestedPrice(null);
-      return;
-    }
-
-    const timer = setTimeout(async () => {
+    if (!sym) { setSuggested(null); return; }
+    const t = setTimeout(async () => {
       try {
         const r = await fetch(`${API_URL}/forecasts/${sym}?limit=1`);
         if (r.ok) {
           const d = await r.json();
-          if (d[0] && d[0].closing_price) {
-            setSuggestedPrice(d[0].closing_price);
-            setForm(f => {
-              if (!f.entryPrice) return { ...f, entryPrice: d[0].closing_price };
-              return f;
-            });
-          } else {
-            setSuggestedPrice(null);
-          }
+          if (d[0]?.closing_price) {
+            setSuggested(d[0].closing_price);
+            setForm(f => f.entryPrice ? f : { ...f, entryPrice: d[0].closing_price });
+          } else setSuggested(null);
         }
-      } catch (e) {
-        console.error("Error fetching price:", e);
-      }
+      } catch (_) {}
     }, 400);
-
-    return () => clearTimeout(timer);
+    return () => clearTimeout(t);
   }, [form.symbol]);
 
-  // Default mock profitable trades from 15-20 days ago (relative to current date June 20, 2026)
-  const defaultMockTrades = [
-    {
-      id: 'mock-1',
-      symbol: 'RELIANCE',
-      side: 'BUY',
-      entryPrice: 2420.0,
-      qty: 10,
-      entryDate: '2026-06-01',
-      exitDate: '2026-06-12',
-      exitPrice: 2575.0,
-      status: 'Closed',
-      notes: 'Quantile breakout signal, target hit.'
-    },
-    {
-      id: 'mock-2',
-      symbol: 'TCS',
-      side: 'BUY',
-      entryPrice: 3820.0,
-      qty: 5,
-      entryDate: '2026-06-03',
-      exitDate: '2026-06-15',
-      exitPrice: 4015.0,
-      status: 'Closed',
-      notes: 'FinBERT positive sentiment support, trend follow.'
-    },
-    {
-      id: 'mock-3',
-      symbol: 'INFY',
-      side: 'BUY',
-      entryPrice: 1410.0,
-      qty: 15,
-      entryDate: '2026-06-05',
-      exitDate: '2026-06-18',
-      exitPrice: 1495.0,
-      status: 'Closed',
-      notes: 'High conviction buy signal, EMA crossover.'
-    },
-    {
-      id: 'mock-4',
-      symbol: 'HDFCBANK',
-      side: 'BUY',
-      entryPrice: 1495.0,
-      qty: 20,
-      entryDate: '2026-06-02',
-      exitDate: '2026-06-16',
-      exitPrice: 1585.0,
-      status: 'Closed',
-      notes: 'VIX circuit breaker safe, mean reversion.'
-    }
-  ];
-
+  // ── Load trades: Notion → localStorage → mock ────────────────────────────────
   async function loadTrades() {
     if (!user) return;
     setLoading(true);
+    const localKey = `trades_${user.id || user.email}`;
+
     try {
-      // First, try loading from Supabase
-      const { data, error } = await supabase
-        .from('portfolio_log')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('entry_date', { ascending: false });
+      const res  = await fetch(`${API_URL}/notion/trades?email=${encodeURIComponent(user.email)}`);
+      const data = res.ok ? await res.json() : null;
 
-      if (error) throw error;
-
-      let mapped = (data || []).map(row => ({
-        id: row.id,
-        symbol: row.symbol,
-        side: row.quantity < 0 ? 'SELL' : 'BUY',
-        entryPrice: Number(row.entry_price),
-        qty: Math.abs(row.quantity),
-        entryDate: row.entry_date,
-        exitDate: row.exit_date,
-        exitPrice: row.exit_price ? Number(row.exit_price) : null,
-        status: row.exit_date ? 'Closed' : 'Open',
-        notes: row.notes || ''
-      }));
-
-      // If database is empty, check localStorage or use default mock trades
-      if (mapped.length === 0) {
-        const localData = localStorage.getItem(`trades_${user.id}`);
-        if (localData) {
-          mapped = JSON.parse(localData);
+      if (data && data.length > 0) {
+        setTrades(data.map(mapNotionTrade));
+      } else {
+        // Notion empty → check localStorage
+        const local = localStorage.getItem(localKey);
+        if (local) {
+          setTrades(JSON.parse(local));
         } else {
-          mapped = defaultMockTrades;
-          localStorage.setItem(`trades_${user.id}`, JSON.stringify(defaultMockTrades));
+          // Nothing anywhere → show mocks
+          setTrades(DEFAULT_MOCK_TRADES);
+          localStorage.setItem(localKey, JSON.stringify(DEFAULT_MOCK_TRADES));
         }
       }
-      setTrades(mapped);
     } catch (err) {
-      console.warn("Failed to load trades from Supabase, falling back to localStorage:", err.message);
-      const localData = localStorage.getItem(`trades_${user.id}`);
-      if (localData) {
-        setTrades(JSON.parse(localData));
-      } else {
-        setTrades(defaultMockTrades);
-        localStorage.setItem(`trades_${user.id}`, JSON.stringify(defaultMockTrades));
-      }
+      console.warn('Notion trades failed, falling back to localStorage:', err.message);
+      const local = localStorage.getItem(localKey);
+      setTrades(local ? JSON.parse(local) : DEFAULT_MOCK_TRADES);
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    loadTrades();
-  }, [user]);
+  useEffect(() => { loadTrades(); }, [user]);
 
+  // ── Add trade ─────────────────────────────────────────────────────────────────
   const addTrade = async () => {
-    if (!form.symbol || !form.entryPrice || !form.qty) return;
-    
-    const qtyVal = Number(form.qty);
-    const dbQuantity = form.side === 'SELL' ? -qtyVal : qtyVal;
-    
-    const newTrade = {
-      id: 'local-' + Date.now(),
-      symbol: form.symbol.toUpperCase(),
-      entryPrice: Number(form.entryPrice),
-      qty: qtyVal,
-      side: form.side,
-      entryDate: form.entryDate || new Date().toISOString().split('T')[0],
-      exitPrice: null,
-      exitDate: null,
-      status: 'Open',
-      notes: form.notes || ''
+    if (!form.symbol || !form.entryPrice || !form.qty || !user?.email) return;
+
+    const payload = {
+      email:       user.email,
+      symbol:      form.symbol.toUpperCase(),
+      side:        form.side,
+      entry_price: Number(form.entryPrice),
+      qty:         Number(form.qty),
+      entry_date:  form.entryDate || new Date().toISOString().split('T')[0],
+      notes:       form.notes || '',
     };
 
-    // Try inserting into Supabase
+    const localKey = `trades_${user.id || user.email}`;
+
     try {
-      const dbTrade = {
-        user_id: user.id,
-        symbol: newTrade.symbol,
-        entry_price: newTrade.entryPrice,
-        quantity: dbQuantity,
-        entry_date: newTrade.entryDate,
-        exit_price: null,
-        exit_date: null,
-        notes: newTrade.notes || null
-      };
-      
-      const { error } = await supabase.from('portfolio_log').insert(dbTrade);
-      if (error) throw error;
-      
-      loadTrades();
+      const res = await fetch(`${API_URL}/notion/trades`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+      if (res.ok) {
+        loadTrades();
+      } else throw new Error('Notion failed');
     } catch (err) {
-      console.warn("Failed to add trade to Supabase, writing to localStorage:", err.message);
-      const currentTrades = [newTrade, ...trades].sort((a, b) => b.entryDate.localeCompare(a.entryDate));
-      localStorage.setItem(`trades_${user.id}`, JSON.stringify(currentTrades));
-      setTrades(currentTrades);
+      console.warn('Notion add trade failed, writing locally:', err.message);
+      const newTrade = {
+        id: 'local-' + Date.now(),
+        symbol:     payload.symbol,
+        side:       payload.side,
+        entryPrice: payload.entry_price,
+        qty:        payload.qty,
+        entryDate:  payload.entry_date,
+        exitPrice: null, exitDate: null, status: 'Open',
+        notes: payload.notes,
+      };
+      const updated = [newTrade, ...trades];
+      localStorage.setItem(localKey, JSON.stringify(updated));
+      setTrades(updated);
     }
 
     setForm({ symbol: '', side: 'BUY', entryPrice: '', qty: '', entryDate: '', notes: '' });
     setShowForm(false);
   };
 
-  const removeTrade = async (id) => {
-    try {
-      if (typeof id === 'number' || (typeof id === 'string' && !id.startsWith('local') && !id.startsWith('mock'))) {
-        const { error } = await supabase.from('portfolio_log').delete().eq('id', id);
-        if (error) throw error;
-      }
-    } catch (err) {
-      console.warn("Failed to delete trade from Supabase:", err.message);
-    }
-
-    // Update state and localStorage
-    const updatedTrades = trades.filter(x => x.id !== id);
-    localStorage.setItem(`trades_${user.id}`, JSON.stringify(updatedTrades));
-    setTrades(updatedTrades);
-  };
-
-  const handleCloseTrade = async (id) => {
+  // ── Close trade ───────────────────────────────────────────────────────────────
+  const handleClose = async (id) => {
     if (!closeForm.exitPrice || !closeForm.exitDate) return;
-    
-    try {
-      if (typeof id === 'number' || (typeof id === 'string' && !id.startsWith('local') && !id.startsWith('mock'))) {
-        const { error } = await supabase
-          .from('portfolio_log')
-          .update({
-            exit_price: Number(closeForm.exitPrice),
-            exit_date: closeForm.exitDate
-          })
-          .eq('id', id);
+    const localKey = `trades_${user.id || user.email}`;
+    const isLocal  = typeof id === 'string' && (id.startsWith('local-') || id.startsWith('mock-'));
 
-        if (error) throw error;
+    if (!isLocal) {
+      try {
+        await fetch(`${API_URL}/notion/trades/${id}/close`, {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ exit_price: Number(closeForm.exitPrice), exit_date: closeForm.exitDate }),
+        });
+      } catch (err) {
+        console.warn('Notion close trade failed:', err.message);
       }
-    } catch (err) {
-      console.warn("Failed to close trade in Supabase:", err.message);
     }
 
-    // Update state and localStorage
-    const updatedTrades = trades.map(t => {
-      if (t.id === id) {
-        return {
-          ...t,
-          exitPrice: Number(closeForm.exitPrice),
-          exitDate: closeForm.exitDate,
-          status: 'Closed'
-        };
-      }
-      return t;
-    });
-    localStorage.setItem(`trades_${user.id}`, JSON.stringify(updatedTrades));
-    setTrades(updatedTrades);
-    
-    setClosingTradeId(null);
+    const updated = trades.map(t => t.id === id
+      ? { ...t, exitPrice: Number(closeForm.exitPrice), exitDate: closeForm.exitDate, status: 'Closed' }
+      : t
+    );
+    localStorage.setItem(localKey, JSON.stringify(updated));
+    setTrades(updated);
+    setClosingId(null);
     setCloseForm({ exitPrice: '', exitDate: '' });
   };
 
-  const totalPnL = trades.reduce((sum, t) => {
-    if (t.exitPrice == null) return sum;
-    return sum + (t.side === 'BUY' ? (t.exitPrice - t.entryPrice) * t.qty : (t.entryPrice - t.exitPrice) * t.qty);
-  }, 0);
+  // ── Remove trade ──────────────────────────────────────────────────────────────
+  const removeTrade = async (id) => {
+    const localKey = `trades_${user.id || user.email}`;
+    const isLocal  = typeof id === 'string' && (id.startsWith('local-') || id.startsWith('mock-'));
 
-  const openCount = trades.filter(t => t.status === 'Open').length;
-  const closedWins = trades.filter(t => t.exitPrice != null && (t.side === 'BUY' ? t.exitPrice > t.entryPrice : t.exitPrice < t.entryPrice)).length;
-  const closedTotal = trades.filter(t => t.exitPrice != null).length;
-  const winRate = closedTotal > 0 ? ((closedWins / closedTotal) * 100).toFixed(0) : '—';
+    if (!isLocal) {
+      try {
+        await fetch(`${API_URL}/notion/trades/${id}`, { method: 'DELETE' });
+      } catch (err) {
+        console.warn('Notion delete trade failed:', err.message);
+      }
+    }
+
+    const updated = trades.filter(t => t.id !== id);
+    localStorage.setItem(localKey, JSON.stringify(updated));
+    setTrades(updated);
+  };
+
+  // ── Summary stats ──────────────────────────────────────────────────────────────
+  const totalPnL   = trades.reduce((s, t) => t.exitPrice == null ? s : s + (t.side === 'BUY' ? (t.exitPrice - t.entryPrice) * t.qty : (t.entryPrice - t.exitPrice) * t.qty), 0);
+  const openCount  = trades.filter(t => t.status === 'Open').length;
+  const closed     = trades.filter(t => t.exitPrice != null);
+  const wins       = closed.filter(t => t.side === 'BUY' ? t.exitPrice > t.entryPrice : t.exitPrice < t.entryPrice).length;
+  const winRate    = closed.length > 0 ? ((wins / closed.length) * 100).toFixed(0) : '—';
 
   return (
     <div className="bg-mesh min-h-screen p-6">
@@ -290,11 +220,10 @@ export default function Portfolio() {
               <BookOpen className="w-6 h-6 text-violet-400" />
               <span>Trade Log</span>
             </h1>
-            <p className="text-slate-400 text-sm mt-0.5">Manual log only · no brokerage connection</p>
+            <p className="text-slate-400 text-sm mt-0.5">Manual log · Notion-synced</p>
           </div>
-          <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center space-x-2">
-            <Plus className="w-4 h-4" />
-            <span>Log Trade</span>
+          <button id="add-trade-btn" onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center space-x-2">
+            <Plus className="w-4 h-4" /><span>Log Trade</span>
           </button>
         </div>
 
@@ -312,7 +241,7 @@ export default function Portfolio() {
           </div>
           <div className="glass-card p-4 text-center">
             <p className="text-2xl font-bold text-white">{winRate}%</p>
-            <p className="text-xs text-slate-400 mt-1">Win Rate (N={closedTotal})</p>
+            <p className="text-xs text-slate-400 mt-1">Win Rate (N={closed.length})</p>
           </div>
         </div>
 
@@ -323,33 +252,24 @@ export default function Portfolio() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-slate-400 mb-1">Symbol</label>
-                <input 
-                  value={form.symbol} 
-                  onChange={e => setForm(f => ({...f, symbol: e.target.value}))} 
-                  placeholder="RELIANCE" 
-                  className="input-field" 
-                />
+                <input id="trade-symbol" value={form.symbol} onChange={e => setForm(f => ({...f, symbol: e.target.value}))} placeholder="RELIANCE" className="input-field" />
               </div>
               <div>
                 <label className="block text-xs text-slate-400 mb-1">Side</label>
                 <select value={form.side} onChange={e => setForm(f => ({...f, side: e.target.value}))} className="input-field">
-                  <option>BUY</option>
-                  <option>SELL</option>
+                  <option>BUY</option><option>SELL</option>
                 </select>
               </div>
               <div>
                 <div className="flex justify-between items-end mb-1">
                   <label className="block text-xs text-slate-400">Entry Price (₹)</label>
                   {suggestedPrice && (
-                    <button 
-                      onClick={() => setForm(f => ({...f, entryPrice: suggestedPrice}))}
-                      className="text-[10px] text-blue-400 hover:text-blue-300 font-medium tracking-wide"
-                    >
+                    <button onClick={() => setForm(f => ({...f, entryPrice: suggestedPrice}))} className="text-[10px] text-blue-400 hover:text-blue-300 font-medium">
                       Use: ₹{suggestedPrice}
                     </button>
                   )}
                 </div>
-                <input type="number" value={form.entryPrice} onChange={e => setForm(f => ({...f, entryPrice: e.target.value}))} placeholder="2450" className="input-field" />
+                <input id="trade-entry-price" type="number" value={form.entryPrice} onChange={e => setForm(f => ({...f, entryPrice: e.target.value}))} placeholder="2450" className="input-field" />
               </div>
               <div>
                 <label className="block text-xs text-slate-400 mb-1">Quantity</label>
@@ -361,7 +281,7 @@ export default function Portfolio() {
               </div>
               <div>
                 <label className="block text-xs text-slate-400 mb-1">Notes</label>
-                <input value={form.notes} onChange={e => setForm(f => ({...f, notes: e.target.value}))} placeholder="Signal conviction, sector..." className="input-field" />
+                <input value={form.notes} onChange={e => setForm(f => ({...f, notes: e.target.value}))} placeholder="Signal, sector..." className="input-field" />
               </div>
             </div>
             <div className="flex space-x-2 mt-4">
@@ -373,14 +293,11 @@ export default function Portfolio() {
 
         {/* Trade list */}
         {loading ? (
-          <div className="space-y-3">
-            {[1, 2, 3].map(i => <div key={i} className="shimmer h-24 rounded-xl" />)}
-          </div>
+          <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="shimmer h-24 rounded-xl" />)}</div>
         ) : trades.length === 0 ? (
           <div className="glass-card p-12 text-center">
             <BookOpen className="w-8 h-8 text-slate-600 mx-auto mb-3" />
-            <p className="text-slate-400">Your portfolio log is empty</p>
-            <p className="text-sm text-slate-500 mt-1">Log your first trade to start tracking performance</p>
+            <p className="text-slate-400">Your trade log is empty</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -399,21 +316,14 @@ export default function Portfolio() {
                   </div>
 
                   <div className="flex items-center space-x-4">
-                    <div className="text-center hidden sm:block">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        t.status === 'Open'
-                          ? 'bg-blue-500/15 text-blue-400'
-                          : 'bg-slate-500/15 text-slate-400'
-                      }`}>{t.status}</span>
-                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full hidden sm:block ${t.status === 'Open' ? 'bg-blue-500/15 text-blue-400' : 'bg-slate-500/15 text-slate-400'}`}>
+                      {t.status}
+                    </span>
                     <PnLBadge entry={t.entryPrice} exit={t.exitPrice} side={t.side} qty={t.qty} />
                     <div className="flex items-center gap-1">
                       {t.status === 'Open' && (
                         <button
-                          onClick={() => {
-                            setClosingTradeId(closingTradeId === t.id ? null : t.id);
-                            setCloseForm({ exitPrice: '', exitDate: '' });
-                          }}
+                          onClick={() => { setClosingId(closingId === t.id ? null : t.id); setCloseForm({ exitPrice: '', exitDate: '' }); }}
                           className="p-1.5 hover:bg-emerald-500/10 rounded-lg text-slate-600 hover:text-emerald-400 transition-colors"
                           title="Close Position"
                         >
@@ -427,39 +337,19 @@ export default function Portfolio() {
                   </div>
                 </div>
 
-                {closingTradeId === t.id && (
+                {/* Close form */}
+                {closingId === t.id && (
                   <div className="pt-3 border-t border-slate-800 flex items-end gap-3 animate-fade-in-up">
                     <div className="flex-1">
                       <label className="block text-xs text-slate-400 mb-1">Exit Price (₹)</label>
-                      <input 
-                        type="number" 
-                        value={closeForm.exitPrice} 
-                        onChange={e => setCloseForm(f => ({ ...f, exitPrice: e.target.value }))} 
-                        placeholder="e.g. 2500" 
-                        className="input-field py-1.5 text-sm" 
-                      />
+                      <input type="number" value={closeForm.exitPrice} onChange={e => setCloseForm(f => ({...f, exitPrice: e.target.value}))} placeholder="e.g. 2500" className="input-field py-1.5 text-sm" />
                     </div>
                     <div className="flex-1">
                       <label className="block text-xs text-slate-400 mb-1">Exit Date</label>
-                      <input 
-                        type="date" 
-                        value={closeForm.exitDate} 
-                        onChange={e => setCloseForm(f => ({ ...f, exitDate: e.target.value }))} 
-                        className="input-field py-1.5 text-sm" 
-                      />
+                      <input type="date" value={closeForm.exitDate} onChange={e => setCloseForm(f => ({...f, exitDate: e.target.value}))} className="input-field py-1.5 text-sm" />
                     </div>
-                    <button 
-                      onClick={() => handleCloseTrade(t.id)} 
-                      className="btn-primary py-1.5 px-3 text-sm h-[38px] whitespace-nowrap"
-                    >
-                      Confirm
-                    </button>
-                    <button 
-                      onClick={() => setClosingTradeId(null)} 
-                      className="btn-secondary py-1.5 px-3 text-sm h-[38px] whitespace-nowrap"
-                    >
-                      Cancel
-                    </button>
+                    <button onClick={() => handleClose(t.id)} className="btn-primary py-1.5 px-3 text-sm h-[38px] whitespace-nowrap">Confirm</button>
+                    <button onClick={() => setClosingId(null)} className="btn-secondary py-1.5 px-3 text-sm h-[38px] whitespace-nowrap">Cancel</button>
                   </div>
                 )}
               </div>

@@ -13,7 +13,7 @@ print(f"SUPABASE_SERVICE_ROLE_KEY DECODED ROLE: {role}")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import forecasts, stocks, market
+from routers import forecasts, stocks, market, notion_auth
 
 app = FastAPI(title="TradeSignal Pro API")
 
@@ -25,9 +25,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(forecasts.router, prefix="/api/forecasts", tags=["Forecasts"])
-app.include_router(stocks.router, prefix="/api/stocks", tags=["Stocks"])
-app.include_router(market.router, prefix="/api/market", tags=["Market"])
+app.include_router(forecasts.router,   prefix="/api/forecasts", tags=["Forecasts"])
+app.include_router(stocks.router,      prefix="/api/stocks",    tags=["Stocks"])
+app.include_router(market.router,      prefix="/api/market",    tags=["Market"])
+app.include_router(notion_auth.router, prefix="/api/notion",    tags=["Notion"])
 
 @app.get("/")
 def health_check():
